@@ -1,0 +1,23 @@
+node_modules/
+.npm-cache/
+dist/
+extension/
+Video/review/
+*.log
+.browser-check/
+.ui-browser/
+.ui-compact/
+.ui-layout/
+.ui-check.mjs
+react-*.tgz
+.package-for-install.json
+
+# Environment variables & secrets
+.env
+.env.*
+*.env
+
+# Archives & OS files
+*.zip
+.DS_Store
+Thumbs.db

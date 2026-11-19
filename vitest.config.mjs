@@ -1,0 +1,1 @@
+export default {test:{environment:'jsdom',environmentOptions:{jsdom:{url:'https://cliq.zoho.com/company/717321507/chats/CT_retired_destination'}},include:['tests/**/*.test.{ts,tsx}'],restoreMocks:true,pool:'forks',maxWorkers:1,fileParallelism:false}};
