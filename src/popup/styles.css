@@ -12,6 +12,7 @@
   --cup-mark: #21382d;
 }
 * {box-sizing: border-box;}
+html {scroll-padding-block: 84px 104px;}
 body {margin: 0; min-inline-size: 240px;}
 button, input, select, textarea {font: inherit;}
 button {cursor: pointer;}
@@ -19,13 +20,12 @@ button, a, input, select, summary { -webkit-tap-highlight-color: transparent; }
 button {color: inherit;}
 button:disabled {cursor: wait; opacity: .55;}
 :where(button, a, input, select, textarea, summary):focus-visible {outline: 3px solid #496cce; outline-offset: 4px;}
-svg {flex-shrink: 0; vertical-align: middle;}
-button svg {pointer-events: none;}
+.ui-icon {display: block; inline-size: var(--icon-size); block-size: var(--icon-size); flex: none; vertical-align: middle; pointer-events: none;}
 h1, h2, h3, p {margin: 0;}
 .app {inline-size: 100%; max-inline-size: 480px; min-block-size: 100dvh; margin-inline: auto; padding: 0 clamp(16px, 5.8vw, 28px) 102px;}
 .app-header {display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-block: 24px 23px; position: sticky; inset-block-start: 0; z-index: 3; background: var(--paper);}
 .brand {display: flex; align-items: center; gap: 10px;}
-.brand-mark {display: grid; place-items: center; inline-size: 40px; block-size: 42px; background: var(--ink); color: var(--lime); border-radius: 13px 13px 13px 3px; transform: rotate(-5deg);}
+.brand-mark {display: grid; place-items: center; inline-size: 40px; block-size: 42px; flex: none; background: var(--ink); color: var(--lime); border-radius: 13px 13px 13px 3px; transform: rotate(-5deg);}
 .brand h1 {font-size: clamp(20px, 6vw, 25px); font-weight: 750; letter-spacing: -1.35px; line-height: 1.05;}
 .brand-period {color: #779d31;}
 .brand p {font-size: 8px; letter-spacing: 1.35px; font-weight: 650; margin-block-start: 6px; color: #5f6d52;}
@@ -51,11 +51,10 @@ main {min-inline-size: 0;}
 .orb {position: relative; inline-size: 100%; aspect-ratio: 1; margin: 0; align-self: center; display: grid; place-items: center; color: #d9f68a;}
 .orbit-lines {position: absolute; inline-size: 100%; block-size: 100%; inset: 0; opacity: .25;}
 .cup-art {position: relative; inline-size: 48px; block-size: 46px; margin-block-start: 9px; transform: rotate(-8deg);}
-.cup-art > svg {inline-size: 100%; block-size: 100%; filter: drop-shadow(0 7px 9px #0d1a1430);}
-.orbit-spark {position: absolute; inset-inline-end: -10px; inset-block-start: -7px; font-size: 14px; color: #94b94e;}
-.steam {display: flex; gap: 5px; position: absolute; inset-block-start: -3px; inset-inline-start: 13px; transform: rotate(8deg);}
-.steam i {display: block; inline-size: 3px; block-size: 12px; border-inline-start: 1.5px solid #d8f383; border-radius: 50%; transform: rotate(18deg); opacity: .65;}
-.steam i:nth-child(2) {margin-block-start: -5px;}
+.cup-illustration {display: block; inline-size: 100%; block-size: 100%; filter: drop-shadow(0 7px 9px #0d1a1430);}
+.orbit-spark {position: absolute; inset-inline-end: -9px; inset-block-start: -7px; color: #b1d467;}
+.steam {position: absolute; inline-size: 28px; block-size: 16px; inset-block-start: -5px; inset-inline-start: 8px; overflow: visible; opacity: .7;}
+.steam path {transform-box: fill-box; transform-origin: center;}
 .hero-copy {position: relative; min-inline-size: 0; align-self: center;}
 .hero-copy h2 {font-size: 20px; line-height: 1.15; font-weight: 600; letter-spacing: -.65px; text-wrap: balance;}
 .hero-copy p {font-size: 11px; line-height: 1.5; color: #becdb4; margin-block-start: 7px;}
@@ -65,16 +64,16 @@ main {min-inline-size: 0;}
 .is-pending .status-tag {background: #fff5dc55; border-color: #98562633;}
 .is-pending .status-dot {background: #8f4c2c;}
 .is-pending .orb {color: #74452e;}
-.is-pending .steam i {border-color: #74452e;}
 .is-pending .orbit-spark {color: #ba7047;}
 .is-pending .hero-copy p {color: #744a32;}
 .is-problem:not(.is-pending) {background: #3b3530;}
 .timer-face {display: flex; flex-direction: column; align-items: center; position: relative;}
 .timer-face > span {font-size: 25px; font-weight: 500; letter-spacing: -1px; font-variant-numeric: tabular-nums; color: #e1faa6; line-height: 1.15;}
 .timer-face > small {font-size: 6px; font-weight: 600; letter-spacing: .25px; margin-block-start: 5px; color: #bacd9d;}
-.send-progress {display: block; inline-size: 100%; block-size: 4px; border: 0; border-radius: 20px; margin-block-start: 6px; accent-color: var(--lime); grid-column: 1 / -1;}
-.send-progress::-webkit-progress-bar {background: #a9bd7940; border-radius: 20px;}
-.send-progress::-webkit-progress-value {background: var(--lime); border-radius: 20px;}
+.send-progress {inline-size: 100%; block-size: 4px; overflow: hidden; border-radius: 20px; margin-block-start: 6px; background: #a9bd7940; grid-column: 1 / -1;}
+.send-progress > span {display: block; inline-size: 40%; block-size: 100%; border-radius: inherit; background: var(--lime); transform: translateX(75%);}
+.is-pending .send-progress {background: #74452e30;}
+.is-pending .send-progress > span {background: #74452e;}
 .action-area {margin-block-end: 22px;}
 .duration-fieldset {border: 0; padding: 0; margin: 0; min-inline-size: 0;}
 .duration-fieldset legend {display: flex; justify-content: space-between; inline-size: 100%; padding: 0; margin-block-end: 13px; font-size: 13px; font-weight: 700; letter-spacing: -.2px;}
@@ -173,16 +172,27 @@ summary {cursor: pointer; min-block-size: 39px; padding-block: 10px; font-size: 
 .empty-state p {font-size: 11px; color: #5f6d52; line-height: 1.8; margin-block-start: 10px;}
 .visually-hidden:where(:not(:focus-within, :active)) {position: absolute; clip-path: inset(50%); overflow: hidden; inline-size: 1px; block-size: 1px; margin: -1px; padding: 0; border: 0; white-space: nowrap;}
 @media (prefers-reduced-motion: no-preference) {
-  .workspace {animation: arrive 330ms cubic-bezier(.2,.65,.3,1) both;}
-  .cup-art {animation: cup-settle 1.7s ease-in-out 2;}
-  .steam i {animation: steam-rise 1.8s ease-in-out 2;}
-  .steam i:nth-child(2) {animation-delay: .15s;}
-  .steam i:nth-child(3) {animation-delay: .3s;}
-  .button,.presets button,.destination-card {transition: background-color 160ms, border-color 160ms, transform 160ms;}
+  .workspace {animation: arrive 240ms cubic-bezier(.2,.65,.3,1) backwards;}
+  .cup-art {animation: cup-settle 4.5s ease-in-out infinite;}
+  .steam path {animation: steam-rise 2.8s ease-in-out infinite;}
+  .steam path:nth-child(2) {animation-delay: -.9s;}
+  .steam path:nth-child(3) {animation-delay: -1.8s;}
+  .message-hero-art {animation: message-float 4.5s ease-in-out infinite;}
+  .preset-check {animation: check-in 180ms ease-out backwards;}
+  .send-progress > span {animation: send-wait 1.6s ease-in-out infinite;}
+  .button,.presets button,.destination-card,.icon-button,.bottom-nav button,.custom-stepper > button {transition: background-color 160ms, border-color 160ms, color 160ms, transform 160ms;}
+  .button > .ui-icon,.bottom-nav .ui-icon {transition: transform 160ms ease;}
   .button:active:not(:disabled),.presets button:active:not(:disabled) {transform: translateY(1px);}
-  @keyframes arrive {from {opacity: 0; transform: translateY(7px);} to {opacity: 1; transform: translateY(0);}}
-  @keyframes cup-settle {0%,100% {transform: rotate(-8deg);} 50% {transform: translateY(-3px) rotate(-5deg);}}
-  @keyframes steam-rise {0%,100% {opacity: .65; transform: translateY(0) rotate(18deg);} 50% {opacity: .25; transform: translateY(-6px) rotate(8deg);}}
+  @media (hover: hover) {
+    .button:hover:not(:disabled) > .ui-icon[data-icon='arrow'] {transform: translateX(3px);}
+    .bottom-nav button:hover .ui-icon {transform: translateY(-1px);}
+  }
+  @keyframes arrive {from {opacity: 0; transform: translateY(5px);} to {opacity: 1; transform: translateY(0);}}
+  @keyframes cup-settle {0%,100% {transform: translateY(0) rotate(-8deg);} 50% {transform: translateY(-2px) rotate(-5deg);}}
+  @keyframes steam-rise {0%,100% {opacity: .3; transform: translateY(1px);} 50% {opacity: .9; transform: translateY(-4px);}}
+  @keyframes message-float {0%,100% {transform: translateY(0) rotate(-6deg);} 50% {transform: translateY(-2px) rotate(-3deg);}}
+  @keyframes check-in {from {opacity: 0; transform: scale(.6);} to {opacity: 1; transform: scale(1);}}
+  @keyframes send-wait {from {transform: translateX(-100%);} to {transform: translateX(250%);}}
 }
 @media (max-height: 760px) {
   .app-header {padding-block: 18px;}
@@ -227,7 +237,18 @@ summary {cursor: pointer; min-block-size: 39px; padding-block: 10px; font-size: 
 .view-today .action-area {margin-block-end: 0;}
 .view-today .desk-note {display: none;}
 .bottom-nav button {flex-direction: column; gap: 4px; font-size: 9px; min-inline-size: 0; padding-inline: 3px;}
-.bottom-nav {gap: 3px;}
+.bottom-nav button > span:last-child {white-space: nowrap;}
+.bottom-nav {display: grid; grid-template-columns: repeat(3,minmax(0,1fr)) minmax(0,1.35fr); gap: 3px;}
+@media (max-width: 280px) {
+  .app {padding-inline: 12px;}
+  .brand {gap: 7px;}
+  .brand-mark {inline-size: 30px; block-size: 34px;}
+  .brand h1 {font-size: 18px;}
+  .brand p {font-size: 6px; letter-spacing: .3px;}
+  .icon-button {inline-size: 28px;}
+  .bottom-nav button {font-size: 8px;}
+  .bottom-nav button > span:last-child {display: grid; place-items: center; min-block-size: 20px; white-space: normal; line-height: 1.2;}
+}
 .custom-message-view textarea {inline-size: 100%; min-block-size: 140px; resize: vertical; padding: 12px; border: 1px solid #7b876f; border-radius: 10px; background: #fffffa; color: var(--ink); font-size: 16px; line-height: 1.5;}
 .custom-message-view input,.custom-message-view select {font-size: 16px; min-block-size: 48px;}
 .queue-heading {font-size: 16px; margin-block: 18px 12px;}

@@ -6,7 +6,7 @@ const paths={
   clock:'M12 8v4l3 2M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
   sun:'M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5M17 12a5 5 0 1 1-10 0 5 5 0 0 1 10 0',
   grid:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',activity:'M3 12h4l3-8 4 16 3-8h4',
-  settings:'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8M9 3l1-1h4l1 3 3 1 3-1 2 4-2 3 1 3-2 3-3-1-3 2-1 3h-4l-1-3-3-1-3 1-2-4 2-3-1-3 2-3 3 1z',
+  settings:'M10.01 4.56 10.44 2.12h3.12l.43 2.44 1.86.77 2.03-1.42 2.21 2.21-1.42 2.03.77 1.86 2.44.43v3.12l-2.44.43-.77 1.86 1.42 2.03-2.21 2.21-2.03-1.42-1.86.77-.43 2.44h-3.12l-.43-2.44-1.86-.77-2.03 1.42-2.21-2.21 1.42-2.03-.77-1.86-2.44-.43v-3.12l2.44-.43.77-1.86-1.42-2.03 2.21-2.21 2.03 1.42Z M15.25 12a3.25 3.25 0 1 1-6.5 0 3.25 3.25 0 0 1 6.5 0Z',
   window:'M4 4h16v16H4zM4 9h16M14 9v11',external:'M14 3h7v7m0-7L10 14M10 3H3v18h18v-7',
   coffee:'M4 8h13v8a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V8Zm13 1h1a3 3 0 1 1 0 6h-1M7 2v2m4-2v2m4-2v2',
   shield:'m12 2 8 4v6c0 5-8 10-8 10S4 17 4 12V6l8-4Zm-4 10 3 3 5-6',bell:'M6 9a6 6 0 0 1 12 0v6l2 3H4l2-3V9Zm4 12h4',
@@ -14,5 +14,5 @@ const paths={
 } as const;
 export type IconName=keyof typeof paths;
 export function Icon({name,size=20,style}:{name:IconName;size?:number;style?:CSSProperties}) {
-  return <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" style={style}><path d={paths[name]}/></svg>;
+  return <svg className="ui-icon" data-icon={name} aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" style={{...style,'--icon-size':`${size}px`} as CSSProperties}><path d={paths[name]}/></svg>;
 }
