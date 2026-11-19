@@ -2,6 +2,7 @@ import {LATE_GRACE_MS,parseCustomDestination} from '../config';
 import type {Command,CustomData,CustomDraft,CustomJob,Destination,Operation,Profile,Receipt} from '../types';
 import {inspect,sendMessage} from './cliqMessenger';
 import {notify} from './reminderManager';
+import {queueTelegramJobs} from './telegramNotifier';
 
 export const CUSTOM_ALARM='breakbuddy-custom';
 const emptyDraft=():CustomDraft=>({text:'',url:'',name:'',minutes:30,timing:'delay',sendAt:''});
@@ -23,6 +24,7 @@ async function storeJobs(jobs:CustomJob[]) {
   const active=jobs.filter(j=>!['sent','cancelled'].includes(j.status));
   const done=jobs.filter(j=>['sent','cancelled'].includes(j.status)).slice(0,40);
   await chrome.storage.local.set({customJobs:[...active,...done]});
+  await queueTelegramJobs([...active,...done]);
   await restoreCustomAlarm([...active,...done]);
 }
 async function restoreCustomAlarm(jobs:CustomJob[]) {
@@ -64,6 +66,7 @@ export async function recoverCustom(allowSend=false,startup=false) {
     }
   }
   if(changed)await storeJobs(jobs);else await restoreCustomAlarm(jobs);
+  await queueTelegramJobs(jobs);
 }
 export async function customCommand(command:Command,profile:Profile) {
   const data=await readCustom();

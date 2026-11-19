@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Cliq BreakBuddy",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "minimum_chrome_version": "120",
-  "description": "Schedule Cliq Break/Back check-ins and custom reports with saved chat destinations in a persistent side panel.",
+  "description": "Schedule Cliq Break/Back and custom messages with optional Telegram delivery reports in a persistent side panel.",
   "permissions": [
     "storage",
     "alarms",
@@ -14,7 +14,8 @@
     "tabs"
   ],
   "host_permissions": [
-    "https://cliq.zoho.com/*"
+    "https://cliq.zoho.com/*",
+    "https://api.telegram.org/*"
   ],
   "background": {
     "service_worker": "background.js",

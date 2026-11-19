@@ -2,6 +2,7 @@ import {useEffect,useState} from 'react';
 import {CLIQ_PROFILE} from '../../config';
 import type {Command,Destination,Group,Profile,State} from '../../types';
 import {Icon} from './Icon';
+import {TelegramSettings} from './TelegramSettings';
 const fields:Record<keyof Profile,string>={root:'Active chat container',chatIdAttribute:'Container chat ID attribute',header:'Chat title',editor:'Message editor',send:'Send control or shortcut mode',row:'Message row',rowIdAttribute:'Message ID attribute',body:'Message text',own:'Your own message selector',acknowledged:'Confirmation mode or selector'};
 export function Settings({state,busy,execute}:{state:State;busy:boolean;execute:(command:Command)=>Promise<any>}) {
   const [group,setGroup]=useState<Group>(state.group);const [profile,setProfile]=useState({...state.profile});
@@ -30,6 +31,7 @@ export function Settings({state,busy,execute}:{state:State;busy:boolean;execute:
       <button className="button primary" type="submit" disabled={busy}><span>{busy?'Saving…':'Save preferences'}</span><Icon name="check"/></button>
       <p role="status" className="save-notice">{notice}</p>
     </form>
+    <TelegramSettings busy={busy} execute={execute}/>
       <div className="companion-note"><span className="note-icon"><Icon name="window"/></span><div><strong>A companion, not a disappearing popup.</strong><p>Keep this panel open beside your tabs. If the browser closes it after restarting, click the BreakBuddy icon to bring it back. Your pending return is always saved.</p></div></div>
     <details className="advanced"><summary>Advanced setup & diagnostics</summary>
       <fieldset className="form-card" disabled={busy}><legend>Sending preference</legend><label htmlFor="send-shortcut">Match your Cliq shortcut</label><select id="send-shortcut" name="sendShortcut" form="preferences-form" value={profile.send.startsWith('@cliq-')?profile.send:'custom'} onChange={e=>{if(e.target.value!=='custom')setProfile({...profile,send:e.target.value});}}><option value="@cliq-enter">Enter · Cliq default</option><option value="@cliq-shift-enter">Shift + Enter · Send button enabled</option>{!profile.send.startsWith('@cliq-') && <option value="custom">Custom Send control</option>}</select><p className="field-hint">Choose Shift + Enter only if you enabled the Send button in Cliq.</p></fieldset>
@@ -38,6 +40,6 @@ export function Settings({state,busy,execute}:{state:State;busy:boolean;execute:
       <div className="button-row"><button className="button secondary" disabled={busy} onClick={()=>inspect('CHECK_SETUP')}>Check saved setup</button><button className="button secondary" disabled={busy} onClick={()=>inspect('INSPECT')}>Inspect Cliq</button></div>
       {report && <><pre className="report">{report}</pre><button className="button secondary" onClick={()=>{const url=URL.createObjectURL(new Blob([report],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='breakbuddy-cliq-diagnostics.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}}>Download diagnostics</button></>}
     </details>
-    <div className="privacy-line"><Icon name="shield" size={15}/><span>Stored on your device. No tracking. No passwords.</span></div>
+    <div className="privacy-line"><Icon name="shield" size={15}/><span>Settings stored on your device. Telegram reports are optional. No tracking.</span></div>
   </section>;
 }

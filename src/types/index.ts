@@ -12,6 +12,11 @@ export interface CustomJob {id:string; text:string; destination:Destination; pro
 export interface CustomData {jobs:CustomJob[]; draft:CustomDraft; destinations:Destination[];}
 export interface Receipt { id: string; outcome: 'confirmed' | 'failed' | 'uncertain'; detail: string; messageId?: string; at: number; }
 export interface History { id: string; text: TextMessage; group: Group; at: number; proof: 'ui' | 'manual'; destination?: Destination; }
+export interface TelegramSettings {
+  enabled: boolean; chatId: string; hasToken: boolean;
+  lastReport: {ok: boolean; detail: string; at: number} | null;
+  pending: number;
+}
 export interface State {
   version: 1; group: Group; productionEnabled: boolean; profile: Profile; customDestination: Destination | null;
   status: Status; scheduledAt: number | null; breakSentAt: number | null;
@@ -21,6 +26,9 @@ export interface State {
   error: string | null; history: History[];
 }
 export type Command =
+  | {type:'GET_TELEGRAM'} | {type:'SAVE_TELEGRAM'; enabled:boolean; botToken:string; chatId:string}
+  | {type:'TEST_TELEGRAM'} | {type:'DISCONNECT_TELEGRAM'}
+  | {type:'FIND_TELEGRAM_CHATS'; botToken:string}
   | {type:'GET_CUSTOM'} | {type:'SAVE_CUSTOM_DRAFT'; draft:CustomDraft}
   | {type:'SCHEDULE_CUSTOM'; text:string; url:string; name:string; scheduledAt:number}
   | {type:'CUSTOM_ACTION'; id:string; action:'cancel'|'send'|'retry'|'resolve'; delivered?:boolean; checked?:boolean}

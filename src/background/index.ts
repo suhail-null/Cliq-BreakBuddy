@@ -6,12 +6,13 @@ import { closeReminder, notify, reminderWindow, updateBadge } from '../services/
 import { complete } from './machine';
 import {recordPanelVisibility,registerPanelAction} from '../services/panelManager';
 import {customCommand,recoverCustom,saveDestination} from '../services/customMessages';
+import {disconnectTelegram,findTelegramChats,flushTelegramReports,getTelegramSettings,queueTelegramState,saveTelegramSettings,testTelegram} from '../services/telegramNotifier';
 import type { Command, Operation, Receipt, State } from '../types';
 
 // All event sources share one queue; a persisted operation prevents replay across worker restarts.
 let queue: Promise<unknown> = Promise.resolve();
-function serial<T>(task:()=>Promise<T>): Promise<T> { const result = queue.then(task); queue = result.catch(()=>{}); return result; }
-async function save(s: State) { await writeState(s); await updateBadge(s); }
+function serial<T>(task:()=>Promise<T>): Promise<T> { const result = queue.then(async()=>{try{return await task();}finally{await flushTelegramReports();}}); queue = result.catch(()=>{}); return result; }
+async function save(s: State) { await writeState(s); await queueTelegramState(s); await updateBadge(s); }
 async function auxiliary(task:()=>Promise<unknown>) { try {await task();} catch(error) {console.warn('BreakBuddy reminder:', error);} }
 async function remind(s: State, force = false) {
   if (!s.backPending || s.status === 'SENDING_BACK' || (s.snoozeUntil ?? 0) > Date.now()) return;
@@ -51,6 +52,7 @@ async function recover(allowDueSend = true, startup = false) {
   } else if (due === 'send' && allowDueSend) s = await perform(s,'Break');
   await updateBadge(s); await restoreAlarms(s); await remind(s,startup);
   await recoverCustom(allowDueSend,startup);
+  await queueTelegramState(s); // Recover reports if the worker stopped after persisting the Cliq result.
   return s;
 }
 async function handle(command: Command) {
@@ -58,6 +60,11 @@ async function handle(command: Command) {
   let s = await recover(false);
   if(['GET_CUSTOM','SAVE_CUSTOM_DRAFT','SCHEDULE_CUSTOM','CUSTOM_ACTION','SAVE_DESTINATION','REMOVE_DESTINATION'].includes(command.type)) return customCommand(command,s.profile);
   switch(command.type) {
+    case 'GET_TELEGRAM': return getTelegramSettings();
+    case 'SAVE_TELEGRAM': return saveTelegramSettings(command.enabled,command.botToken,command.chatId);
+    case 'TEST_TELEGRAM': return testTelegram();
+    case 'DISCONNECT_TELEGRAM': return disconnectTelegram();
+    case 'FIND_TELEGRAM_CHATS': return findTelegramChats(command.botToken);
     case 'GET': return s;
     case 'SCHEDULE':
       if (s.status !== 'AVAILABLE') throw new Error('Finish or cancel the current break first.');

@@ -23,10 +23,41 @@ beforeEach(async()=>{
     idle:{queryState:vi.fn(async()=> 'active'),setDetectionInterval:vi.fn(),onStateChanged:event()},
     scripting:{executeScript:vi.fn()}};
   vi.stubGlobal('chrome',api);
+  vi.stubGlobal('fetch',vi.fn(async()=>({ok:true,status:200,json:async()=>({ok:true,result:{message_id:1}})})));
   await import('../src/background/index');await request({type:'GET'});
 });
 const sends=()=>api.tabs.sendMessage.mock.calls.filter((args:any[])=>args[1].type==='BB_SEND');
 describe('background service worker',()=>{
+  it('reports Break and Back once each without replaying them on repeated recovery',async()=>{
+    expect((await request({type:'SAVE_TELEGRAM',enabled:true,botToken:'123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456789',chatId:'123456789'})).ok).toBe(true);
+    store.state={...store.state,status:'BREAK_SCHEDULED',scheduledAt:Date.now()-500};api.alarms.onAlarm.listeners[0]({name:BREAK_ALARM});
+    await state();await state();await request({type:'BACK'});await state();
+    expect(sends()).toHaveLength(2);expect(fetch).toHaveBeenCalledTimes(2);
+    const texts=vi.mocked(fetch).mock.calls.map(([,options])=>JSON.parse(options!.body as string).text);
+    expect(texts[0]).toContain('Message: Break');expect(texts[1]).toContain('Message: Back');
+    expect((await request({type:'GET_TELEGRAM'})).data).not.toHaveProperty('botToken');
+  });
+  it('preserves confirmed Cliq delivery when Telegram is unavailable',async()=>{
+    await request({type:'SAVE_TELEGRAM',enabled:true,botToken:'123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456789',chatId:'123456789'});
+    vi.mocked(fetch).mockRejectedValue(new Error('offline'));store.state={...store.state,status:'BACK_PENDING',backPending:true};
+    expect((await request({type:'BACK'})).ok).toBe(true);expect(store.state.status).toBe('AVAILABLE');expect(store.state.history[0].text).toBe('Back');
+    expect(store.telegramReports[0].status).toBe('pending');expect(sends()).toHaveLength(1);
+  });
+  it('reports a custom message from its alarm using the captured destination',async()=>{
+    await request({type:'SAVE_TELEGRAM',enabled:true,botToken:'123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456789',chatId:'123456789'});
+    await request({type:'SCHEDULE_CUSTOM',text:'DSR\nCompleted my report',url:'https://cliq.zoho.com/company/717321507/chats/CT_reports',name:'Reports',scheduledAt:Date.now()+60_000});
+    store.customJobs[0].scheduledAt=Date.now()-100;api.alarms.onAlarm.listeners[0]({name:'breakbuddy-custom'});await state();await state();
+    expect(fetch).toHaveBeenCalledTimes(1);expect(sends()).toHaveLength(1);
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string).text).toContain('Chat: Reports');
+    expect(store.customJobs[0].status).toBe('sent');expect(store.state.status).toBe('AVAILABLE');
+  });
+  it('reports a recovered receipt after worker interruption without another Cliq send',async()=>{
+    await request({type:'SAVE_TELEGRAM',enabled:true,botToken:'123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456789',chatId:'123456789'});
+    const op={id:'recovered',text:'Back',group:'production',startedAt:Date.now()};
+    store.state={...store.state,status:'SENDING_BACK',backPending:true,operation:op};
+    store['receipt:recovered']={id:op.id,outcome:'confirmed',at:Date.now(),detail:'sent'};
+    await state();await state();expect(fetch).toHaveBeenCalledTimes(1);expect(sends()).toHaveLength(0);expect(store.state.status).toBe('AVAILABLE');
+  });
   it('requires destination activation before scheduling a new MarTech break',async()=>{
     store.state.productionEnabled=false;expect((await request({type:'SCHEDULE',minutes:1})).ok).toBe(false);expect(sends()).toHaveLength(0);expect(store.state.scheduledAt).toBeNull();
   });

@@ -10,6 +10,7 @@ const customData={jobs:[],destinations:[{name:'Reports',id:'CT_reports',url:'htt
 beforeEach(()=>{
   current=defaultState();box=document.createElement('div');document.body.append(box);root=createRoot(box);
   api={runtime:{getURL:(p:string)=>`chrome-extension://test/${p}`,sendMessage:vi.fn(async(command:any)=>{
+    if(command.type==='GET_TELEGRAM')return {ok:true,data:{enabled:false,chatId:'',hasToken:false,lastReport:null,pending:0}};
     if(command.type==='GET_CUSTOM'||command.type==='SCHEDULE_CUSTOM')return {ok:true,data:structuredClone(customData)};
     if(command.type==='SCHEDULE')current={...current,status:'BREAK_SCHEDULED',scheduledAt:Date.now()+command.minutes*60_000};
     if(command.type==='BACK')current={...current,status:'AVAILABLE',backPending:false};
@@ -21,6 +22,29 @@ afterEach(async()=>{await act(async()=>{root.unmount();});box.remove();vi.unstub
 async function render(state:State=current){current=state;await act(async()=>{root.render(<App/>);});}
 function button(text:string){const result=[...box.querySelectorAll('button')].find(b=>b.textContent?.includes(text));if(!result)throw new Error(`No button: ${text}`);return result;}
 describe('side companion UI',()=>{
+  it('connects Telegram separately during a pending break, clears the token input, and tests the saved bot',async()=>{
+    let telegram={enabled:false,chatId:'',hasToken:false,lastReport:null,pending:0};
+    const original=api.runtime.sendMessage.getMockImplementation()!;
+    api.runtime.sendMessage.mockImplementation(async(command:any)=>{
+      if(command.type==='GET_TELEGRAM'||command.type==='TEST_TELEGRAM')return {ok:true,data:telegram};
+      if(command.type==='FIND_TELEGRAM_CHATS')return {ok:true,data:[{id:'123456789',name:'My Telegram chat'}]};
+      if(command.type==='SAVE_TELEGRAM'){telegram={...telegram,enabled:command.enabled,chatId:command.chatId,hasToken:true};return {ok:true,data:telegram};}
+      return original(command);
+    });
+    await render({...current,status:'BACK_PENDING',backPending:true});await act(async()=>{button('Settings').click();});
+    const tokenInput=box.querySelector<HTMLInputElement>('#telegram-token')!;expect(tokenInput.type).toBe('password');
+    await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(tokenInput,'123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456789');tokenInput.dispatchEvent(new Event('input',{bubbles:true}));});
+    await act(async()=>{button('Find chat ID').click();});
+    const select=box.querySelector<HTMLSelectElement>('#telegram-found-chat')!;
+    await act(async()=>{select.value='123456789';select.dispatchEvent(new Event('change',{bubbles:true}));box.querySelector<HTMLInputElement>('#telegram-enabled')!.click();});
+    expect(button('Send Telegram test').disabled).toBe(true);
+    await act(async()=>{box.querySelector('form.telegram-settings')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));});
+    expect(tokenInput.value).toBe('');expect(button('Send Telegram test').disabled).toBe(false);
+    expect(api.runtime.sendMessage).toHaveBeenCalledWith({type:'SAVE_TELEGRAM',enabled:true,chatId:'123456789',botToken:'123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456789'});
+    await act(async()=>{button('Send Telegram test').click();});
+    expect(api.runtime.sendMessage).toHaveBeenCalledWith({type:'TEST_TELEGRAM'});expect(current.backPending).toBe(true);
+    expect(api.runtime.sendMessage.mock.calls.some(([command]:any)=>command.type==='SAVE_CONFIG'||command.type==='BACK')).toBe(false);
+  });
   it('places Custom Message last and preserves the selected date/time form and report text',async()=>{
     await render();expect([...box.querySelectorAll('nav button')].map(b=>b.textContent)).toEqual(['Today','Activity','Settings','Custom Message']);
     await act(async()=>{button('Custom Message').click();});

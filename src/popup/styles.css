@@ -11,6 +11,17 @@
   --line: #e1e5d7;
   --cup-mark: #21382d;
 }
+.telegram-settings {margin-block: 18px;}
+.telegram-settings .field-hint {line-height: 1.6;}
+.telegram-settings .check-field input {inline-size: 18px; block-size: 18px; min-block-size: 18px; padding: 0; flex: none;}
+.telegram-help {font-size: 11px; line-height: 1.7; margin-block: 14px;}
+.telegram-help summary {cursor: pointer; font-weight: 650;}
+.telegram-help ol {padding-inline-start: 18px;}
+.telegram-help li {margin-block: 8px; overflow-wrap: anywhere;}
+.telegram-help a {color: #365e36; text-decoration: underline;}
+.telegram-result {font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; padding: 10px; background: #e9efdc; border-radius: 8px; margin-block-start: 10px;}
+.telegram-result time {display: block; font-size: 10px;}
+.telegram-failed {background: #ffead8; color: #794021;}
 * {box-sizing: border-box;}
 html {scroll-padding-block: 84px 104px;}
 body {margin: 0; min-inline-size: 240px;}

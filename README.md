@@ -1,6 +1,6 @@
 # Cliq BreakBuddy
 
-A Manifest V3 Chrome extension that schedules `Break` in Zoho Cliq, keeps a persistent **side panel**, **BACK** badge and reminders, and sends `Back` only after your confirmation. React, TypeScript, Vite; no backend, API credentials, internal Cliq endpoints, or runtime browser automation framework.
+A Manifest V3 Chrome extension that schedules `Break` in Zoho Cliq, keeps a persistent **side panel**, **BACK** badge and reminders, and sends `Back` only after your confirmation. React, TypeScript, Vite; no backend, internal Cliq endpoints, or runtime browser automation framework. Optional Telegram delivery reports use your own bot token, stored locally in the extension.
 
 **The extension is built in `extension/` (also available in `dist/`). The built-in Cliq profile now fills the adapter automatically; previous blank settings migrate on upgrade.** The recording shows the chat UI and native scheduling dialog but does not expose DOM selectors. No selectors are represented as verified against your account. No real Cliq messages were sent during development.
 
@@ -24,7 +24,7 @@ The Today, Custom Message, Activity, and Settings views share the same persisten
 
 The header also offers **Open in a separate window** for a persistent standalone companion. Browsers without the Side Panel API fall back to a normal extension tab. That window/tab remains open after Back is confirmed.
 
-After updating, click **Reload** in `chrome://extensions`, enable the extension if the browser requests the updated permissions, then click its toolbar icon. The build remains in the same `extension` folder. Added permissions are `sidePanel` for the browser panel and `tabs` for locating Cliq/reminder tabs across browser windows; website access remains restricted to Cliq. No new accounts, tracking, or remote scripts are used.
+After updating, click **Reload** in `chrome://extensions`, enable the extension if the browser requests the updated permissions, then click its toolbar icon. The build remains in the same `extension` folder. Permissions include `sidePanel` for the browser panel and `tabs` for locating Cliq/reminder tabs across browser windows. Website access covers Cliq and `api.telegram.org` for optional Telegram reports. Telegram is contacted only when reports are enabled or you request chat lookup/a test. No tracking or remote scripts are used.
 
 [Available view](docs/ui-preview/available.png) ? [Back pending](docs/ui-preview/back-pending.png) ? [Narrow panel](docs/ui-preview/narrow-panel.png)
 
@@ -44,6 +44,22 @@ npm.cmd run build
 ```
 
 Node 22.12+ or 24+ is recommended. PowerShell's execution policy may block `npm.ps1`; `npm.cmd` works without changing policy. Load `extension`, never the project root. Every build refreshes that folder. After source changes, rebuild and click **Reload** for the extension in Chrome. Reload any already-open Cliq pages if you changed the content script.
+
+## Telegram delivery reports — version 1.3
+
+Telegram reports cover Break, Back, and custom messages. They distinguish **successfully sent**, **not sent**, **delivery uncertain**, and **missed schedule**. A success uses the same Cliq UI verification as the extension; manual confirmation is labelled as your review. An uncertain result never claims failure or triggers another Cliq send.
+
+1. Reload the built extension in `chrome://extensions` and accept the added access to `https://api.telegram.org/*` if Chrome asks.
+2. In Telegram, open [@BotFather](https://t.me/BotFather), send `/newbot`, and follow its prompts to create a bot and get a token. See [Telegram's bot creation guide](https://core.telegram.org/bots/features#creating-a-new-bot).
+3. Open your new bot and send `/start`. For a group, add the bot and send a command addressed to it, such as `/start@YourBotUsername`.
+4. Open BreakBuddy **Settings → Telegram delivery reports**. Paste the bot token, click **Find chat ID**, and select the chat that should receive reports. You can also enter a numeric chat ID manually or use a public channel's `@username`. Channel bots need permission to post. Chat lookup uses [getUpdates](https://core.telegram.org/bots/api#getupdates) without consuming updates; a bot already using a webhook or another update reader may require a dedicated reporting bot or a manually entered chat ID.
+5. Enable reports, click **Save Telegram settings**, then **Send Telegram test**. Check that the test arrives in the intended Telegram chat.
+
+Each report includes the Cliq destination name, up to 200 characters of the message, the result time in UTC, and verification/failure details. The token is saved in this browser profile's extension storage, kept out of ordinary state/settings responses and error messages, and never built into the extension or sharing archive. Leave the token blank to preserve it when editing settings. **Disconnect** removes the saved token and reporting queue. Disabling reporting stops Telegram requests; changing the bot, recipient, or enabled setting starts a new reporting session and clears the old queue. Older delivery history is not forwarded on connection.
+
+Reports are queued in local storage and deduplicated by attempt and outcome. The worker recovers queued reports after interruption. Temporary connection failures and rate limits retry up to five times through the existing recovery alarm; invalid tokens/chat permissions are shown in Settings. A Telegram failure never changes a Cliq delivery result or retries a Cliq message. A Telegram alert can repeat if Telegram accepted it just before the worker was interrupted, since the API offers no idempotency key. Chrome must remain running for reports to be delivered; missed schedules can only be reported when Chrome resumes.
+
+Tests mock the Telegram API; live delivery requires completing the setup and sending the test in your own browser profile.
 
 `npm.cmd run dev` serves the React UI, but extension APIs only work in installed extension pages. Click the pinned toolbar icon to open the installed side panel and test the complete flow.
 

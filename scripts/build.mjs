@@ -6,8 +6,8 @@ await viteBuild({configFile:false,build:{outDir:'dist',emptyOutDir:false,sourcem
 await viteBuild({configFile:false,build:{outDir:'dist',emptyOutDir:false,sourcemap:true,minify:false,target:'chrome120',lib:{entry:path.resolve('src/content/index.ts'),name:'BreakBuddyContent',formats:['iife'],fileName:()=> 'content.js'}}});
 await mkdir('dist/icons',{recursive:true});
 for(const size of [16,32,48,128]) await copyFile(`public/icons/icon${size}.png`,`dist/icons/icon${size}.png`);
-const manifest={manifest_version:3,name:'Cliq BreakBuddy',version:'1.2.1',minimum_chrome_version:'120',description:'Schedule Cliq Break/Back check-ins and custom reports with saved chat destinations in a persistent side panel.',
-  permissions:['storage','alarms','notifications','idle','scripting','sidePanel','tabs'],host_permissions:['https://cliq.zoho.com/*'],
+const manifest={manifest_version:3,name:'Cliq BreakBuddy',version:'1.3.0',minimum_chrome_version:'120',description:'Schedule Cliq Break/Back and custom messages with optional Telegram delivery reports in a persistent side panel.',
+  permissions:['storage','alarms','notifications','idle','scripting','sidePanel','tabs'],host_permissions:['https://cliq.zoho.com/*','https://api.telegram.org/*'],
   background:{service_worker:'background.js',type:'module'},action:{default_title:'Open BreakBuddy side panel',default_icon:{16:'icons/icon16.png',32:'icons/icon32.png'}},
   side_panel:{default_path:'sidepanel.html'},
   commands:{'_execute_action':{suggested_key:{default:'Alt+Shift+B'},description:'Open BreakBuddy side panel'}},
