@@ -1,7 +1,6 @@
 node_modules/
 .npm-cache/
 dist/
-extension/
 Video/review/
 *.log
 .browser-check/
