@@ -27,7 +27,59 @@ beforeEach(async()=>{
   await import('../src/background/index');await request({type:'GET'});
 });
 const sends=()=>api.tabs.sendMessage.mock.calls.filter((args:any[])=>args[1].type==='BB_SEND');
+async function pressTelegram(kind:string,updateId=10) {
+  const report=store.telegramReports.find((r:any)=>r.buttons?.some((b:any)=>b.action.kind===kind&&!b.used));
+  const button=report.buttons.find((b:any)=>b.action.kind===kind);
+  const update={update_id:updateId,callback_query:{id:`query-${updateId}`,from:{id:123456789,is_bot:false},data:`bb:${button.token}`,message:{message_id:report.messageIds[0],date:Math.floor(Date.now()/1000),chat:{id:123456789}}}};
+  vi.mocked(fetch).mockImplementation(async(url:any)=>({ok:true,status:200,json:async()=>({ok:true,result:String(url).endsWith('/getUpdates')?[update]:String(url).endsWith('/sendMessage')?{message_id:updateId+1}:true})}) as Response);
+  if(store.telegramActionPoll)store.telegramActionPoll.nextAt=0;
+  await api.alarms.onAlarm.listeners[0]({name:'breakbuddy-telegram-actions'});
+}
 describe('background service worker',()=>{
+  it('snoozes then sends Back through real Telegram callbacks using the existing state machine',async()=>{
+    await request({type:'SAVE_TELEGRAM',enabled:true,botToken:'123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456789',chatId:'123456789'});
+    store.state={...store.state,status:'BREAK_SCHEDULED',scheduledAt:Date.now()-100};api.alarms.onAlarm.listeners[0]({name:BREAK_ALARM});await state();
+    expect(sends()).toHaveLength(1);await pressTelegram('snooze');
+    expect(store.state.backPending).toBe(true);expect(store.state.snoozeUntil).toBeGreaterThan(Date.now()+290_000);expect(sends()).toHaveLength(1);
+    expect(store.telegramReports.some((r:any)=>r.text.includes('Back reminder snoozed'))).toBe(true);
+    await pressTelegram('back',11);expect(store.state.status).toBe('AVAILABLE');expect(store.state.backPending).toBe(false);expect(sends()).toHaveLength(2);
+    expect(sends()[1][1].operation.text).toBe('Back');expect(store.telegramLastAction.ok).toBe(true);
+  });
+  it('cancels custom and Break schedules from Telegram and reports both cancellations without a send',async()=>{
+    await request({type:'SAVE_TELEGRAM',enabled:true,botToken:'123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456789',chatId:'123456789'});
+    await request({type:'SCHEDULE',minutes:10});
+    await request({type:'SCHEDULE_CUSTOM',text:'DSR',url:'https://cliq.zoho.com/company/717321507/chats/CT_reports',name:'Reports',scheduledAt:Date.now()+60_000});
+    await pressTelegram('cancel-custom');expect(store.customJobs[0].status).toBe('cancelled');expect(store.state.status).toBe('BREAK_SCHEDULED');
+    await pressTelegram('cancel-break',11);expect(store.state.status).toBe('AVAILABLE');expect(alarmStore.has(BREAK_ALARM)).toBe(false);expect(sends()).toHaveLength(0);
+    expect(store.telegramReports.filter((r:any)=>r.text.includes('schedule cancelled'))).toHaveLength(2);
+  });
+  it('keeps a stale Telegram return button from authorizing an uncertain Back retry',async()=>{
+    await request({type:'SAVE_TELEGRAM',enabled:true,botToken:'123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456789',chatId:'123456789'});
+    store.state={...store.state,status:'BREAK_SCHEDULED',scheduledAt:Date.now()-100};api.alarms.onAlarm.listeners[0]({name:BREAK_ALARM});await state();
+    store.state={...store.state,status:'UNCERTAIN',submission:'uncertain',operation:{id:'uncertain-back',text:'Back',group:'production',startedAt:Date.now()}};
+    await pressTelegram('back');expect(sends()).toHaveLength(1);expect(store.state.status).toBe('UNCERTAIN');expect(store.telegramLastAction.ok).toBe(false);
+  });
+  it('does not block a new schedule while an incoming Telegram long poll is waiting',async()=>{
+    await request({type:'SAVE_TELEGRAM',enabled:true,botToken:'123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456789',chatId:'123456789'});
+    let finish!:(response:any)=>void;
+    vi.mocked(fetch).mockImplementation(async(url:any)=>String(url).endsWith('/getUpdates')?new Promise(resolve=>{finish=resolve;}):({ok:true,status:200,json:async()=>({ok:true,result:{message_id:1}})} as Response));
+    const polling=api.alarms.onAlarm.listeners[0]({name:'breakbuddy-telegram-actions'});
+    expect((await request({type:'SCHEDULE',minutes:10})).ok).toBe(true);expect(store.state.status).toBe('BREAK_SCHEDULED');
+    finish({ok:true,status:200,json:async()=>({ok:true,result:[]})});await polling;
+  });
+  it('waits for the current long poll before discovering chats with the same bot',async()=>{
+    await request({type:'SAVE_TELEGRAM',enabled:true,botToken:'123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456789',chatId:'123456789'});
+    let finish!:(response:any)=>void;
+    vi.mocked(fetch).mockImplementation(async(url:any,options:any)=>{
+      if(String(url).endsWith('/getUpdates'))return JSON.parse(options.body).timeout===20?new Promise(resolve=>{finish=resolve;}):({ok:true,status:200,json:async()=>({ok:true,result:[{message:{chat:{id:123456789,first_name:'Me'}}}]})} as Response);
+      return {ok:true,status:200,json:async()=>({ok:true,result:true})} as Response;
+    });
+    const polling=api.alarms.onAlarm.listeners[0]({name:'breakbuddy-telegram-actions'});await state();
+    const finding=request({type:'FIND_TELEGRAM_CHATS',botToken:''});
+    finish({ok:true,status:200,json:async()=>({ok:true,result:[]})});
+    expect((await finding).data).toEqual([{id:'123456789',name:'Me'}]);await polling;
+    expect(vi.mocked(fetch).mock.calls.filter(([url])=>String(url).endsWith('/getUpdates')).map(([,options])=>JSON.parse(options!.body as string).timeout)).toEqual([20,0]);
+  });
   it('confirms a newly scheduled Break in Telegram once, then reports delivery separately',async()=>{
     await request({type:'SAVE_TELEGRAM',enabled:true,botToken:'123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456789',chatId:'123456789'});
     const result=await request({type:'SCHEDULE',minutes:10});
@@ -78,8 +130,9 @@ describe('background service worker',()=>{
     await request({type:'SAVE_TELEGRAM',enabled:true,botToken:'123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456789',chatId:'123456789'});
     await request({type:'SCHEDULE_CUSTOM',text:'DSR\nCompleted my report',url:'https://cliq.zoho.com/company/717321507/chats/CT_reports',name:'Reports',scheduledAt:Date.now()+60_000});
     store.customJobs[0].scheduledAt=Date.now()-100;api.alarms.onAlarm.listeners[0]({name:'breakbuddy-custom'});await state();await state();
-    expect(fetch).toHaveBeenCalledTimes(1);expect(sends()).toHaveLength(1);
-    expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string).text).toContain('Chat: Reports');
+    expect(fetch).toHaveBeenCalledTimes(2);expect(sends()).toHaveLength(1);
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string).text).toContain('Custom message scheduled');
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[1][1]!.body as string).text).toContain('Chat: Reports');
     expect(store.customJobs[0].status).toBe('sent');expect(store.state.status).toBe('AVAILABLE');
   });
   it('reports a recovered receipt after worker interruption without another Cliq send',async()=>{

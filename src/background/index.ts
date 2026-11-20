@@ -5,13 +5,16 @@ import { findTab, inspect, sendMessage } from '../services/cliqMessenger';
 import { closeReminder, notify, reminderWindow, updateBadge } from '../services/reminderManager';
 import { complete } from './machine';
 import {recordPanelVisibility,registerPanelAction} from '../services/panelManager';
-import {customCommand,recoverCustom,saveDestination} from '../services/customMessages';
+import {customCommand,readCustom,recoverCustom,saveDestination} from '../services/customMessages';
 import {disconnectTelegram,findTelegramChats,flushTelegramReports,getTelegramSettings,queueTelegramState,saveTelegramSettings,testTelegram} from '../services/telegramNotifier';
+import {commandForTelegramAction,fetchTelegramActions,processTelegramActions,restoreTelegramPolling,TELEGRAM_POLL_ALARM} from '../services/telegramActions';
 import type { Command, Operation, Receipt, State } from '../types';
 
 // All event sources share one queue; a persisted operation prevents replay across worker restarts.
 let queue: Promise<unknown> = Promise.resolve();
-function serial<T>(task:()=>Promise<T>): Promise<T> { const result = queue.then(async()=>{try{return await task();}finally{await flushTelegramReports();}}); queue = result.catch(()=>{}); return result; }
+let telegramPoll:Promise<void>|null=null;
+let telegramPollRequest:ReturnType<typeof fetchTelegramActions>|null=null;
+function serial<T>(task:()=>Promise<T>): Promise<T> { const result = queue.then(async()=>{try{return await task();}finally{await flushTelegramReports();await auxiliary(restoreTelegramPolling);}}); queue = result.catch(()=>{}); return result; }
 async function save(s: State) { await writeState(s); await queueTelegramState(s); await updateBadge(s); }
 async function auxiliary(task:()=>Promise<unknown>) { try {await task();} catch(error) {console.warn('BreakBuddy reminder:', error);} }
 async function remind(s: State, force = false) {
@@ -61,10 +64,13 @@ async function handle(command: Command) {
   if(['GET_CUSTOM','SAVE_CUSTOM_DRAFT','SCHEDULE_CUSTOM','CUSTOM_ACTION','SAVE_DESTINATION','REMOVE_DESTINATION'].includes(command.type)) return customCommand(command,s.profile);
   switch(command.type) {
     case 'GET_TELEGRAM': return getTelegramSettings();
-    case 'SAVE_TELEGRAM': return saveTelegramSettings(command.enabled,command.botToken,command.chatId);
+    case 'SAVE_TELEGRAM': return saveTelegramSettings(command.enabled,command.botToken,command.chatId,command.controllerId);
     case 'TEST_TELEGRAM': return testTelegram();
     case 'DISCONNECT_TELEGRAM': return disconnectTelegram();
-    case 'FIND_TELEGRAM_CHATS': return findTelegramChats(command.botToken);
+    case 'FIND_TELEGRAM_CHATS':
+      // Chat discovery and the action reader must not compete for the same bot's updates.
+      if(telegramPollRequest)await telegramPollRequest;
+      return findTelegramChats(command.botToken);
     case 'GET': return s;
     case 'SCHEDULE':
       if (s.status !== 'AVAILABLE') throw new Error('Finish or cancel the current break first.');
@@ -134,7 +140,20 @@ chrome.runtime.onMessage.addListener((command: Command, sender: any, respond: an
   }
   void serial(()=>handle(command)).then(data=>respond({ok:true,data}),error=>respond({ok:false,error:String(error.message ?? error)})); return true;
 });
-chrome.alarms.onAlarm.addListener(()=>run(()=>recover()));
+chrome.alarms.onAlarm.addListener((alarm:{name:string})=>{
+  if(alarm.name===TELEGRAM_POLL_ALARM) {
+    if(!telegramPoll){telegramPollRequest=fetchTelegramActions();telegramPoll=telegramPollRequest.then(batch=>{
+      if(batch)return serial(()=>processTelegramActions(batch,async action=>{
+        const state=await recover(false);
+        const command=commandForTelegramAction(action,state,(await readCustom()).jobs);
+        await handle(command);
+        return action.kind==='back'?'Back requested. See its delivery report.':action.kind==='snooze'?'Back reminder snoozed for 5 minutes.':'Schedule cancelled.';
+      }));
+    }).catch(()=>console.warn('BreakBuddy: Telegram actions are unavailable.')).finally(()=>{telegramPoll=null;telegramPollRequest=null;});}
+    return telegramPoll;
+  }
+  run(()=>recover());
+});
 chrome.runtime.onInstalled.addListener(()=>run(()=>recover(true,true)));
 chrome.runtime.onStartup.addListener(()=>run(()=>recover(true,true)));
 chrome.idle.setDetectionInterval(60);

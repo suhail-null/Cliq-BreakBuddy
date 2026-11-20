@@ -93,7 +93,7 @@ export async function customCommand(command:Command,profile:Profile) {
     const job=data.jobs[index];
     if(command.action==='cancel') {
       if(!['scheduled','overdue','failed'].includes(job.status))throw new Error('This message cannot be cancelled during an uncertain send.');
-      data.jobs[index]={...job,status:'cancelled',detail:'Cancelled without sending.'};
+      data.jobs[index]={...job,status:'cancelled',at:Date.now(),detail:'Cancelled without sending.'};
     } else if(command.action==='send'||command.action==='retry') {
       if(job.status!==(command.action==='send'?'overdue':'failed'))throw new Error('Check the message status before sending.');
       await perform(data.jobs,job.id);return readCustom();

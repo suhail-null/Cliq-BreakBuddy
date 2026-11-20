@@ -22,6 +22,23 @@ afterEach(async()=>{await act(async()=>{root.unmount();});box.remove();vi.unstub
 async function render(state:State=current){current=state;await act(async()=>{root.render(<App/>);});}
 function button(text:string){const result=[...box.querySelectorAll('button')].find(b=>b.textContent?.includes(text));if(!result)throw new Error(`No button: ${text}`);return result;}
 describe('side companion UI',()=>{
+  it('requires a controller for group-chat buttons and saves that user without changing the Cliq destination',async()=>{
+    let telegram={enabled:true,chatId:'-100123',hasToken:true,lastReport:null,pending:0,controllerId:'',actionsAvailable:false,actionsError:null,lastAction:null};
+    const original=api.runtime.sendMessage.getMockImplementation()!;
+    api.runtime.sendMessage.mockImplementation(async(command:any)=>{
+      if(command.type==='GET_TELEGRAM')return {ok:true,data:telegram};
+      if(command.type==='SAVE_TELEGRAM'){telegram={...telegram,controllerId:command.controllerId,actionsAvailable:true};return {ok:true,data:telegram};}
+      return original(command);
+    });
+    await render();await act(async()=>{button('Settings').click();});
+    expect(box.textContent).toContain('Add your Telegram user ID above');
+    const input=box.querySelector<HTMLInputElement>('#telegram-controller')!;
+    await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'123456789');input.dispatchEvent(new Event('input',{bubbles:true}));});
+    await act(async()=>{box.querySelector('form.telegram-settings')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));});
+    expect(api.runtime.sendMessage).toHaveBeenCalledWith({type:'SAVE_TELEGRAM',enabled:true,botToken:'',chatId:'-100123',controllerId:'123456789'});
+    expect(box.textContent).not.toContain('Add your Telegram user ID above');
+    expect(api.runtime.sendMessage.mock.calls.some(([command]:any)=>command.type==='SAVE_CONFIG'||command.type==='BACK')).toBe(false);
+  });
   it('connects Telegram separately during a pending break, clears the token input, and tests the saved bot',async()=>{
     let telegram={enabled:false,chatId:'',hasToken:false,lastReport:null,pending:0};
     const original=api.runtime.sendMessage.getMockImplementation()!;

@@ -16,6 +16,35 @@ beforeEach(()=>{
 afterEach(()=>{vi.useRealTimers();vi.unstubAllGlobals();});
 
 describe('Telegram delivery reports',()=>{
+  it('reports Break cancellation and deadline changes once without extra scheduling alerts',async()=>{
+    await connect();const state:State={...defaultState(),status:'BREAK_SCHEDULED',scheduledAt:Date.now()+10*60_000};
+    await queueTelegramState(state);await flushTelegramReports();
+    const changed={...state,scheduledAt:state.scheduledAt!+60_000};
+    await queueTelegramState(changed);await queueTelegramState(changed);await flushTelegramReports();
+    expect(fetchMock).toHaveBeenCalledTimes(2);expect(JSON.parse(fetchMock.mock.calls[1][1].body).text).toContain('Break rescheduled');
+    await queueTelegramState({...changed,status:'AVAILABLE',scheduledAt:null});await queueTelegramState({...changed,status:'AVAILABLE',scheduledAt:null});await flushTelegramReports();
+    expect(fetchMock).toHaveBeenCalledTimes(3);expect(JSON.parse(fetchMock.mock.calls[2][1].body).text).toContain('Break schedule cancelled');
+  });
+  it('reports custom scheduling, changed deadlines, and cancellation with the captured destination',async()=>{
+    await connect();const job={id:'job',text:'Daily report',destination,status:'scheduled',scheduledAt:Date.now()+10*60_000,operation:null} as CustomJob;
+    await queueTelegramJobs([job]);await flushTelegramReports();job.scheduledAt+=60_000;
+    await queueTelegramJobs([job]);await queueTelegramJobs([job]);await flushTelegramReports();
+    job.status='cancelled';job.at=Date.now();await queueTelegramJobs([job]);await queueTelegramJobs([job]);await flushTelegramReports();
+    const texts=fetchMock.mock.calls.map((call:any)=>JSON.parse(call[1].body).text);
+    expect(texts).toHaveLength(3);expect(texts[0]).toContain('Custom message scheduled');expect(texts[1]).toContain('Custom message rescheduled');expect(texts[2]).toContain('Custom message schedule cancelled');expect(texts.every((text:string)=>text.includes('Chat: Reports'))).toBe(true);
+  });
+  it('adds return and snooze buttons to pending-cycle reminders, and suppresses sends while uncertain',async()=>{
+    await connect();const start=Date.now();const state:State={...confirmed('cycle',start),status:'BACK_PENDING',backPending:true,breakSentAt:start,lastReminderAt:start};
+    await queueTelegramState(state);await flushTelegramReports();
+    expect(store.telegramReports[0].buttons.map((button:any)=>button.action.kind)).toEqual(['back','snooze']);
+    expect(store.telegramReports).toHaveLength(1); // The first confirmation already offers the return buttons.
+    state.lastReminderAt=start+5*60_000;await queueTelegramState(state);await queueTelegramState(state);await flushTelegramReports();
+    expect(store.telegramReports).toHaveLength(2);expect(store.telegramReports[1].text).toContain('Back is still pending');
+    expect(store.telegramReports[1].buttons).toHaveLength(2);
+    state.status='UNCERTAIN';state.lastReminderAt+=5*60_000;
+    await queueTelegramState(state);await flushTelegramReports();
+    expect(store.telegramReports[2].text).toContain('uncertain attempt');expect(store.telegramReports[2].buttons).toBeUndefined();
+  });
   it('recovers one scheduling confirmation with the saved destination and local send time',async()=>{
     await connect();const scheduledAt=Date.now()+10*60_000;
     const state:State={...defaultState(),status:'BREAK_SCHEDULED',scheduledAt,group:'custom',customDestination:destination};
@@ -55,7 +84,7 @@ describe('Telegram delivery reports',()=>{
     fetchMock.mockResolvedValueOnce(response(200,{ok:true,result:[{message:{chat:{id:123,first_name:'Me'}}},{message:{chat:{id:-100123,title:'Team'}}},{message:{chat:{id:123,first_name:'Me'}}}]}));
     expect(await findTelegramChats(token)).toEqual([{id:'123',name:'Me'},{id:'-100123',name:'Team'}]);
     const payload=JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(payload).toEqual({timeout:0,limit:100});expect(payload).not.toHaveProperty('offset');expect(store.telegramConfig).toBeUndefined();
+    expect(payload).toEqual({timeout:0,limit:100,allowed_updates:['message','channel_post','my_chat_member','callback_query']});expect(payload).not.toHaveProperty('offset');expect(store.telegramConfig).toBeUndefined();
   });
   it('explains missing chats and existing webhook conflicts without changing the bot',async()=>{
     fetchMock.mockResolvedValueOnce(response(200,{ok:true,result:[]}));

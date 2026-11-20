@@ -302,35 +302,6 @@ function complete(state, op, receipt, manual = false) {
     operation: op
   };
 }
-const emptyConfig = () => ({ enabled: false, botToken: "", chatId: "", enabledAt: 0 });
-const MAX_ATTEMPTS = 5;
-async function read() {
-  const data = await chrome.storage.local.get(["telegramConfig", "telegramReports", "telegramLastReport"]);
-  return { config: { ...emptyConfig(), ...data.telegramConfig }, reports: data.telegramReports ?? [], lastReport: data.telegramLastReport ?? null };
-}
-async function getTelegramSettings() {
-  const { config, reports, lastReport } = await read();
-  return { enabled: config.enabled, chatId: config.chatId, hasToken: Boolean(config.botToken), lastReport, pending: reports.filter((r) => r.status === "pending").length };
-}
-async function saveTelegramSettings(enabled, botToken, chatId) {
-  if (typeof enabled !== "boolean" || typeof botToken !== "string" || typeof chatId !== "string") throw new Error("Invalid Telegram settings.");
-  const { config } = await read();
-  const token = botToken.trim() || config.botToken;
-  const chat = chatId.trim();
-  if (token && !/^\d{5,20}:[A-Za-z0-9_-]{20,100}$/.test(token)) throw new Error("Paste the bot token from BotFather.");
-  if (chat && !/^(?:-?[1-9]\d{0,19}|@[A-Za-z][A-Za-z0-9_]{4,31})$/.test(chat)) throw new Error("Enter a numeric Telegram chat ID or an @channel username.");
-  if (enabled && (!token || !chat)) throw new Error("Enter a bot token and chat ID before enabling Telegram reports.");
-  const changed = config.botToken !== token || config.chatId !== chat || config.enabled !== enabled;
-  await chrome.storage.local.set({
-    telegramConfig: { enabled, botToken: token, chatId: chat, enabledAt: changed ? Date.now() : config.enabledAt },
-    ...changed ? { telegramReports: [], telegramLastReport: null } : {}
-  });
-  return getTelegramSettings();
-}
-async function disconnectTelegram() {
-  await chrome.storage.local.set({ telegramConfig: emptyConfig(), telegramReports: [], telegramLastReport: null });
-  return getTelegramSettings();
-}
 class TelegramError extends Error {
   constructor(message2, retryable = false, retryAfter = 6e4) {
     super(message2);
@@ -342,7 +313,7 @@ class TelegramError extends Error {
 }
 async function telegramRequest(botToken, method, body) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8e3);
+  const timeout = setTimeout(() => controller.abort(), method === "getUpdates" && Number(body.timeout) > 0 ? 25e3 : 8e3);
   try {
     const response = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
       method: "POST",
@@ -360,12 +331,12 @@ async function telegramRequest(botToken, method, body) {
     }
     if (!response.ok || data?.ok !== true) {
       const code = data?.error_code ?? response.status;
-      if (code === 429) throw new TelegramError("Telegram rate limit reached. The report will be retried.", true, Math.min(86400, Math.max(60, Number(data?.parameters?.retry_after) || 60)) * 1e3);
+      if (code === 429) throw new TelegramError("Telegram rate limit reached.", true, Math.min(86400, Math.max(60, Number(data?.parameters?.retry_after) || 60)) * 1e3);
       if (code === 401 || code === 404) throw new TelegramError("Telegram rejected the bot token. Check the token from BotFather.");
-      if (code === 403) throw new TelegramError("Telegram blocked this report. Start the bot or give it permission to post in the target chat.");
-      if (code === 409) throw new TelegramError("This bot uses a webhook or another update reader. Use a dedicated bot or enter the chat ID manually.");
-      if (code === 400) throw new TelegramError("Telegram could not send to this chat. Check the chat ID, start the bot, and check its posting permissions.");
-      throw new TelegramError("Telegram could not accept the report.", code >= 500);
+      if (code === 403) throw new TelegramError("Telegram blocked this request. Start the bot or give it permission to post in the target chat.");
+      if (code === 409) throw new TelegramError("This bot uses a webhook or another update reader. Use a dedicated bot for Telegram buttons.");
+      if (code === 400) throw new TelegramError("Telegram could not complete this request. Check the chat ID, start the bot, and check its posting permissions.");
+      throw new TelegramError("Telegram could not accept the request.", code >= 500);
     }
     return data.result;
   } catch (error) {
@@ -375,13 +346,59 @@ async function telegramRequest(botToken, method, body) {
     clearTimeout(timeout);
   }
 }
-const send = (config, text) => telegramRequest(config.botToken, "sendMessage", { chat_id: config.chatId, text, link_preview_options: { is_disabled: true } });
+const emptyConfig = () => ({ enabled: false, botToken: "", chatId: "", enabledAt: 0, controllerId: "" });
+const MAX_ATTEMPTS = 5;
+async function readTelegramData() {
+  const data = await chrome.storage.local.get(["telegramConfig", "telegramReports", "telegramLastReport", "telegramLastAction", "telegramActionsError"]);
+  return {
+    config: { ...emptyConfig(), ...data.telegramConfig },
+    reports: data.telegramReports ?? [],
+    lastReport: data.telegramLastReport ?? null,
+    lastAction: data.telegramLastAction ?? null,
+    actionsError: data.telegramActionsError ?? null
+  };
+}
+const read = readTelegramData;
+const controllerFor = (config) => config.controllerId || (/^[1-9]\d*$/.test(config.chatId) ? config.chatId : "");
+const breakCycleReference = (state) => state.history.find((h) => h.text === "Break")?.id ?? String(state.breakSentAt ?? "");
+async function getTelegramSettings() {
+  const { config, reports, lastReport, lastAction, actionsError } = await read();
+  return { enabled: config.enabled, chatId: config.chatId, hasToken: Boolean(config.botToken), controllerId: config.controllerId, actionsAvailable: config.enabled && Boolean(controllerFor(config)), actionsError, lastAction, lastReport, pending: reports.filter((r) => r.status === "pending").length };
+}
+async function saveTelegramSettings(enabled, botToken, chatId, controllerId) {
+  if (typeof enabled !== "boolean" || typeof botToken !== "string" || typeof chatId !== "string") throw new Error("Invalid Telegram settings.");
+  const { config } = await read();
+  const token = botToken.trim() || config.botToken;
+  const chat = chatId.trim();
+  if (controllerId !== void 0 && typeof controllerId !== "string") throw new Error("Enter a numeric Telegram user ID for buttons.");
+  const controller = controllerId === void 0 ? config.controllerId : controllerId.trim();
+  if (controller && !/^[1-9]\d{0,19}$/.test(controller)) throw new Error("Enter a numeric Telegram user ID for buttons.");
+  if (token && !/^\d{5,20}:[A-Za-z0-9_-]{20,100}$/.test(token)) throw new Error("Paste the bot token from BotFather.");
+  if (chat && !/^(?:-?[1-9]\d{0,19}|@[A-Za-z][A-Za-z0-9_]{4,31})$/.test(chat)) throw new Error("Enter a numeric Telegram chat ID or an @channel username.");
+  if (enabled && (!token || !chat)) throw new Error("Enter a bot token and chat ID before enabling Telegram reports.");
+  const changed = config.botToken !== token || config.chatId !== chat || config.enabled !== enabled || config.controllerId !== controller;
+  await chrome.storage.local.set({
+    telegramConfig: { enabled, botToken: token, chatId: chat, controllerId: controller, enabledAt: changed ? Date.now() : config.enabledAt },
+    ...changed ? { telegramReports: [], telegramLastReport: null, telegramLastAction: null, telegramActionsError: null, telegramActionPoll: {}, telegramBreakSchedule: null, telegramCustomSchedules: {} } : {}
+  });
+  return getTelegramSettings();
+}
+async function disconnectTelegram() {
+  await chrome.storage.local.set({ telegramConfig: emptyConfig(), telegramReports: [], telegramLastReport: null, telegramLastAction: null, telegramActionsError: null, telegramActionPoll: {}, telegramBreakSchedule: null, telegramCustomSchedules: {} });
+  return getTelegramSettings();
+}
+const send = (config, text, buttons) => telegramRequest(config.botToken, "sendMessage", {
+  chat_id: config.chatId,
+  text,
+  link_preview_options: { is_disabled: true },
+  ...buttons?.length ? { reply_markup: { inline_keyboard: buttons.map((button) => [{ text: button.label, callback_data: `bb:${button.token}` }]) } } : {}
+});
 async function findTelegramChats(botToken) {
   if (typeof botToken !== "string") throw new Error("Invalid bot token.");
   const { config } = await read();
   const token = botToken.trim() || config.botToken;
   if (!/^\d{5,20}:[A-Za-z0-9_-]{20,100}$/.test(token)) throw new Error("Paste the bot token from BotFather first.");
-  const updates = await telegramRequest(token, "getUpdates", { timeout: 0, limit: 100 });
+  const updates = await telegramRequest(token, "getUpdates", { timeout: 0, limit: 100, allowed_updates: ["message", "channel_post", "my_chat_member", "callback_query"] });
   const chats = /* @__PURE__ */ new Map();
   if (Array.isArray(updates)) for (const update of updates) {
     const chat = update.message?.chat ?? update.channel_post?.chat ?? update.my_chat_member?.chat;
@@ -405,9 +422,10 @@ async function testTelegram() {
   await recordResult(true, "Telegram test sent successfully.");
   return getTelegramSettings();
 }
-function message(outcome, text, destination, detail, at, manual = false) {
-  const title = { scheduled: "Break scheduled", confirmed: "Message successfully sent", failed: "Message was not sent", uncertain: "Delivery uncertain — check Cliq", overdue: "Scheduled message was missed — not sent" }[outcome];
-  const time = outcome === "scheduled" ? `Scheduled for: ${new Date(at).toLocaleString(void 0, { dateStyle: "medium", timeStyle: "long" })}` : `Time: ${new Date(at).toISOString()}`;
+const localTime = (at) => new Date(at).toLocaleString(void 0, { dateStyle: "medium", timeStyle: "long" });
+function message(outcome, text, destination, detail, at, manual = false, subject = "Break") {
+  const title = { scheduled: `${subject} scheduled`, rescheduled: `${subject} rescheduled`, cancelled: `${subject} schedule cancelled`, "back-pending": "Back is still pending", snoozed: "Back reminder snoozed", confirmed: "Message successfully sent", failed: "Message was not sent", uncertain: "Delivery uncertain — check Cliq", overdue: "Scheduled message was missed — not sent" }[outcome];
+  const time = ["scheduled", "rescheduled"].includes(outcome) ? `Scheduled for: ${localTime(at)}` : `Time: ${new Date(at).toISOString()}`;
   return [
     `BreakBuddy: ${title}`,
     `Chat: ${destination?.name ?? "Saved Cliq destination"}`,
@@ -417,23 +435,48 @@ function message(outcome, text, destination, detail, at, manual = false) {
     ...outcome === "uncertain" ? ["Check this exact attempt in Cliq before retrying."] : []
   ].join("\n");
 }
-async function enqueue(id, outcome, text, destination, detail, at, manual = false) {
+async function enqueue(id, outcome, text, destination, detail, at, manual = false, buttons = [], subject = "Break") {
   const { config, reports } = await read();
   if (!config.enabled || at < config.enabledAt || reports.some((r) => r.id === id)) return;
-  const report = { id, text: message(outcome, text, destination, detail, at, manual), status: "pending", attempts: 0, nextAt: 0 };
+  const report = {
+    id,
+    text: message(outcome, text, destination, detail, at, manual, subject),
+    status: "pending",
+    attempts: 0,
+    nextAt: 0,
+    ...controllerFor(config) && buttons.length ? { buttons: buttons.map((button) => ({ ...button, token: crypto.randomUUID().replaceAll("-", "") })) } : {}
+  };
   await chrome.storage.local.set({ telegramReports: [...reports, report].slice(-300) });
 }
 async function queueTelegramState(state) {
   try {
     if (!(await read()).config.enabled) return;
-    if (state.status === "BREAK_SCHEDULED" && state.scheduledAt) await enqueue(`break:${state.scheduledAt}:scheduled`, "scheduled", "Break", destinationFor(state.group, state.customDestination), "You will receive a separate report when the send is attempted.", state.scheduledAt);
-    for (const entry of [...state.history].reverse()) await enqueue(`${entry.id}:confirmed`, "confirmed", entry.text, entry.destination, "", entry.at, entry.proof === "manual");
+    const data = await chrome.storage.local.get(["telegramBreakSchedule"]);
+    const previous = data.telegramBreakSchedule;
+    if (["BREAK_SCHEDULED", "OVERDUE"].includes(state.status) && state.scheduledAt) {
+      const destination = destinationFor(state.group, state.customDestination);
+      const buttons = [{ label: "Cancel schedule", action: { kind: "cancel-break", reference: String(state.scheduledAt) } }];
+      if (previous?.active && previous.scheduledAt !== state.scheduledAt) await enqueue(`break:${previous.scheduledAt}:${state.scheduledAt}:rescheduled`, "rescheduled", "Break", destination, `Previous time: ${localTime(previous.scheduledAt)}`, state.scheduledAt, false, buttons);
+      else if (state.status === "BREAK_SCHEDULED" && !previous?.active) await enqueue(`break:${state.scheduledAt}:scheduled`, "scheduled", "Break", destination, "You will receive a separate report when the send is attempted.", state.scheduledAt, false, buttons);
+      await chrome.storage.local.set({ telegramBreakSchedule: { scheduledAt: state.scheduledAt, destination, active: true } });
+    } else if (previous?.active) {
+      if (state.status === "AVAILABLE") await enqueue(`break:${previous.scheduledAt}:cancelled`, "cancelled", "Break", previous.destination, "No further send will be attempted for this schedule.", Date.now());
+      await chrome.storage.local.set({ telegramBreakSchedule: { ...previous, active: false } });
+    }
+    const cycle = breakCycleReference(state);
+    const backButtons = state.backPending && ["BACK_PENDING", "ERROR"].includes(state.status) ? [
+      { label: "I'm Back — Send Back", action: { kind: "back", reference: cycle } },
+      { label: "Remind in 5 minutes", action: { kind: "snooze", reference: cycle } }
+    ] : [];
+    for (const entry of [...state.history].reverse()) await enqueue(`${entry.id}:confirmed`, "confirmed", entry.text, entry.destination, "", entry.at, entry.proof === "manual", entry.id === cycle ? backButtons : []);
     const op = state.operation;
     if (op && (state.status === "ERROR" || state.status === "UNCERTAIN")) {
       const outcome = state.status === "ERROR" ? "failed" : "uncertain";
       await enqueue(`${op.id}:${outcome}`, outcome, op.text, op.destination, state.error ?? "", op.startedAt);
     }
     if (state.status === "OVERDUE" && state.scheduledAt) await enqueue(`break:${state.scheduledAt}:overdue`, "overdue", "Break", destinationFor(state.group, state.customDestination), state.error ?? "", state.scheduledAt);
+    if (state.backPending && state.lastReminderAt && state.lastReminderAt - (state.breakSentAt ?? state.lastReminderAt) >= 6e4) await enqueue(`${cycle}:${state.lastReminderAt}:back-pending`, "back-pending", "Back", destinationFor(state.group, state.customDestination), state.status === "UNCERTAIN" ? "Check the uncertain attempt in BreakBuddy before sending again." : "Confirm your return when you are ready. Back is never sent automatically.", state.lastReminderAt, false, backButtons);
+    if (state.backPending && state.snoozeUntil && state.snoozeUntil > Date.now()) await enqueue(`${cycle}:${state.snoozeUntil}:snoozed`, "snoozed", "Back", destinationFor(state.group, state.customDestination), `Next reminder: ${localTime(state.snoozeUntil)}`, state.snoozeUntil - 5 * 6e4, false, backButtons);
   } catch {
     console.warn("BreakBuddy: Could not queue a Telegram report.");
   }
@@ -441,7 +484,29 @@ async function queueTelegramState(state) {
 async function queueTelegramJobs(jobs) {
   try {
     if (!(await read()).config.enabled) return;
+    const { telegramCustomSchedules: previous = {} } = await chrome.storage.local.get(["telegramCustomSchedules"]);
+    const schedules = {};
     for (const job of jobs) {
+      if (job.status === "scheduled") {
+        schedules[job.id] = job.scheduledAt;
+        const changed = previous[job.id] && previous[job.id] !== job.scheduledAt;
+        if (!previous[job.id] || changed) await enqueue(
+          `custom:${job.id}:${job.scheduledAt}:${changed ? "rescheduled" : "scheduled"}`,
+          changed ? "rescheduled" : "scheduled",
+          job.text,
+          job.destination,
+          changed ? `Previous time: ${localTime(previous[job.id])}` : "You will receive a separate report when the send is attempted.",
+          job.scheduledAt,
+          false,
+          [{ label: "Cancel schedule", action: { kind: "cancel-custom", jobId: job.id, reference: String(job.scheduledAt) } }],
+          "Custom message"
+        );
+        continue;
+      }
+      if (job.status === "cancelled") {
+        if (job.at) await enqueue(`custom:${job.id}:cancelled`, "cancelled", job.text, job.destination, "No further send will be attempted for this schedule.", job.at, false, [], "Custom message");
+        continue;
+      }
       if (!["sent", "failed", "uncertain", "overdue"].includes(job.status)) continue;
       const outcome = job.status === "sent" ? "confirmed" : job.status;
       await enqueue(
@@ -454,6 +519,7 @@ async function queueTelegramJobs(jobs) {
         job.status === "sent" && job.detail === "Delivery confirmed after review."
       );
     }
+    await chrome.storage.local.set({ telegramCustomSchedules: schedules });
   } catch {
     console.warn("BreakBuddy: Could not queue a Telegram report.");
   }
@@ -468,9 +534,10 @@ async function flushTelegramReports() {
       report.nextAt = Date.now() + 6e4;
       await chrome.storage.local.set({ telegramReports: reports });
       try {
-        await send(config, report.text);
+        const result = await send(config, report.text, report.buttons);
+        if (Number.isSafeInteger(result?.message_id)) report.messageIds = [...report.messageIds ?? [], result.message_id].slice(-MAX_ATTEMPTS);
         report.status = "sent";
-        await recordResult(true, "Telegram delivery report sent.");
+        await recordResult(true, "Telegram report sent.");
       } catch (error) {
         const failure = error;
         report.status = failure.retryable && report.attempts < MAX_ATTEMPTS ? "pending" : "failed";
@@ -484,6 +551,11 @@ async function flushTelegramReports() {
   } catch {
     console.warn("BreakBuddy: Telegram reporting is unavailable.");
   }
+}
+async function queueTelegramActionFeedback(id, detail) {
+  const { config, reports } = await read();
+  if (!config.enabled || reports.some((r) => r.id === id)) return;
+  await chrome.storage.local.set({ telegramReports: [...reports, { id, text: `BreakBuddy: ${detail}`, status: "pending", attempts: 0, nextAt: 0 }].slice(-300) });
 }
 const CUSTOM_ALARM = "breakbuddy-custom";
 const emptyDraft = () => ({ text: "", url: "", name: "", minutes: 30, timing: "delay", sendAt: "" });
@@ -600,7 +672,7 @@ async function customCommand(command, profile) {
     const job = data.jobs[index];
     if (command.action === "cancel") {
       if (!["scheduled", "overdue", "failed"].includes(job.status)) throw new Error("This message cannot be cancelled during an uncertain send.");
-      data.jobs[index] = { ...job, status: "cancelled", detail: "Cancelled without sending." };
+      data.jobs[index] = { ...job, status: "cancelled", at: Date.now(), detail: "Cancelled without sending." };
     } else if (command.action === "send" || command.action === "retry") {
       if (job.status !== (command.action === "send" ? "overdue" : "failed")) throw new Error("Check the message status before sending.");
       await perform$1(data.jobs, job.id);
@@ -620,13 +692,127 @@ async function customCommand(command, profile) {
   }
   throw new Error("Unknown custom message command.");
 }
+const TELEGRAM_POLL_ALARM = "breakbuddy-telegram-actions";
+const generation = (config) => `${config.enabledAt}:${config.botToken.split(":")[0]}:${config.chatId}:${config.controllerId}`;
+const pollFor = (config, poll) => poll?.generation === generation(config) ? poll : {};
+async function restoreTelegramPolling() {
+  const { config } = await readTelegramData();
+  if (!config.enabled || !controllerFor(config)) {
+    await chrome.alarms.clear(TELEGRAM_POLL_ALARM);
+    return;
+  }
+  if (!await chrome.alarms.get(TELEGRAM_POLL_ALARM)) await chrome.alarms.create(TELEGRAM_POLL_ALARM, { periodInMinutes: 0.5 });
+}
+async function fetchTelegramActions() {
+  const { config } = await readTelegramData();
+  if (!config.enabled || !controllerFor(config)) return null;
+  const stored = await chrome.storage.local.get(["telegramActionPoll"]);
+  const poll = pollFor(config, stored.telegramActionPoll);
+  if (poll.nextAt > Date.now()) return null;
+  await chrome.storage.local.set({ telegramActionPoll: { ...poll, generation: generation(config), nextAt: Date.now() + 3e4 } });
+  try {
+    const updates = await telegramRequest(config.botToken, "getUpdates", {
+      timeout: 20,
+      limit: 25,
+      allowed_updates: ["message", "channel_post", "my_chat_member", "callback_query"],
+      ...Number.isSafeInteger(poll.offset) ? { offset: poll.offset } : {}
+    });
+    if (!Array.isArray(updates)) throw new TelegramError("Telegram returned an unreadable update list.", true);
+    return { config, updates };
+  } catch (error) {
+    const current = (await readTelegramData()).config;
+    if (current.botToken === config.botToken && current.enabledAt === config.enabledAt) {
+      const stored2 = await chrome.storage.local.get(["telegramActionPoll"]);
+      const latest = pollFor(config, stored2.telegramActionPoll);
+      await chrome.storage.local.set({
+        telegramActionsError: error.message,
+        telegramActionPoll: { ...latest, generation: generation(config), nextAt: Date.now() + Math.max(6e4, error.retryAfter ?? 0) }
+      });
+    }
+    return null;
+  }
+}
+function matchesChat(config, chat) {
+  if (!chat) return false;
+  return config.chatId.startsWith("@") ? typeof chat.username === "string" && `@${chat.username}`.toLowerCase() === config.chatId.toLowerCase() : String(chat.id) === config.chatId;
+}
+async function answer(token, queryId, text) {
+  try {
+    await telegramRequest(token, "answerCallbackQuery", { callback_query_id: queryId, text: text.slice(0, 190) });
+  } catch {
+  }
+}
+async function processTelegramActions(batch, execute) {
+  let current = await readTelegramData();
+  if (!current.config.enabled || current.config.botToken !== batch.config.botToken || current.config.enabledAt !== batch.config.enabledAt || current.config.controllerId !== batch.config.controllerId || current.config.chatId !== batch.config.chatId) return;
+  await chrome.storage.local.set({ telegramActionsError: null });
+  for (const update of batch.updates.filter((update2) => update2 && Number.isSafeInteger(update2.update_id)).sort((a, b) => a.update_id - b.update_id)) {
+    if (!Number.isSafeInteger(update.update_id) || update.update_id < 0) continue;
+    const stored = await chrome.storage.local.get(["telegramActionPoll"]);
+    const poll = pollFor(batch.config, stored.telegramActionPoll);
+    if (Number.isSafeInteger(poll.offset) && update.update_id < poll.offset) continue;
+    await chrome.storage.local.set({ telegramActionPoll: { ...poll, generation: generation(batch.config), offset: update.update_id + 1 } });
+    const query = update.callback_query;
+    if (!query || typeof query.id !== "string") continue;
+    current = await readTelegramData();
+    const { config, reports } = current;
+    if (!matchesChat(config, query.message?.chat) || String(query.from?.id) !== controllerFor(config) || query.from?.is_bot || query.message?.date === 0) {
+      await answer(config.botToken, query.id, "This action is not available for this user or chat.");
+      continue;
+    }
+    const token = typeof query.data === "string" && /^bb:[a-f0-9]{32}$/.test(query.data) ? query.data.slice(3) : "";
+    const report = reports.find((r) => r.buttons?.some((b) => b.token === token));
+    const button = report?.buttons?.find((b) => b.token === token);
+    if (!report || !button || button.used || !report.messageIds?.includes(query.message.message_id)) {
+      await answer(config.botToken, query.id, "This button was already used or is no longer available.");
+      continue;
+    }
+    for (const entry of report.buttons ?? []) entry.used = true;
+    await chrome.storage.local.set({ telegramReports: reports, telegramLastAction: { ok: true, detail: "Processing Telegram action…", at: Date.now() } });
+    await answer(config.botToken, query.id, "Processing your request. Check the follow-up report.");
+    let ok = true;
+    let detail;
+    try {
+      detail = await execute(button.action);
+    } catch (error) {
+      ok = false;
+      detail = `Action not applied: ${(error instanceof Error ? error.message : String(error)).replaceAll(config.botToken, "[hidden]").slice(0, 350)}`;
+    }
+    await chrome.storage.local.set({ telegramLastAction: { ok, detail, at: Date.now() } });
+    if (!ok) await queueTelegramActionFeedback(`action:${token}:rejected`, detail);
+    try {
+      await telegramRequest(config.botToken, "editMessageReplyMarkup", { chat_id: query.message.chat.id, message_id: query.message.message_id, reply_markup: { inline_keyboard: [] } });
+    } catch {
+    }
+  }
+}
+function commandForTelegramAction(action, state, jobs) {
+  if (action.kind === "back" || action.kind === "snooze") {
+    if (!state.backPending || action.reference !== breakCycleReference(state)) throw new Error("This Break/Back cycle has ended. Use the latest Telegram reminder.");
+    if (!["BACK_PENDING", "ERROR"].includes(state.status)) throw new Error("Resolve the current message attempt in BreakBuddy before using this button.");
+    return { type: action.kind === "back" ? "BACK" : "SNOOZE" };
+  }
+  if (action.kind === "cancel-break") {
+    if (!["BREAK_SCHEDULED", "OVERDUE"].includes(state.status) || String(state.scheduledAt) !== action.reference) throw new Error("This Break schedule has changed or already started.");
+    return { type: "CANCEL" };
+  }
+  if (action.kind === "cancel-custom") {
+    const job = jobs.find((j) => j.id === action.jobId);
+    if (!job || !["scheduled", "overdue"].includes(job.status) || String(job.scheduledAt) !== action.reference) throw new Error("This custom schedule has changed or already started.");
+    return { type: "CUSTOM_ACTION", id: job.id, action: "cancel" };
+  }
+  throw new Error("Unknown Telegram action.");
+}
 let queue = Promise.resolve();
+let telegramPoll = null;
+let telegramPollRequest = null;
 function serial(task) {
   const result = queue.then(async () => {
     try {
       return await task();
     } finally {
       await flushTelegramReports();
+      await auxiliary(restoreTelegramPolling);
     }
   });
   queue = result.catch(() => {
@@ -702,12 +888,13 @@ async function handle(command) {
     case "GET_TELEGRAM":
       return getTelegramSettings();
     case "SAVE_TELEGRAM":
-      return saveTelegramSettings(command.enabled, command.botToken, command.chatId);
+      return saveTelegramSettings(command.enabled, command.botToken, command.chatId, command.controllerId);
     case "TEST_TELEGRAM":
       return testTelegram();
     case "DISCONNECT_TELEGRAM":
       return disconnectTelegram();
     case "FIND_TELEGRAM_CHATS":
+      if (telegramPollRequest) await telegramPollRequest;
       return findTelegramChats(command.botToken);
     case "GET":
       return s;
@@ -805,7 +992,26 @@ chrome.runtime.onMessage.addListener((command, sender, respond) => {
   void serial(() => handle(command)).then((data) => respond({ ok: true, data }), (error) => respond({ ok: false, error: String(error.message ?? error) }));
   return true;
 });
-chrome.alarms.onAlarm.addListener(() => run(() => recover()));
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === TELEGRAM_POLL_ALARM) {
+    if (!telegramPoll) {
+      telegramPollRequest = fetchTelegramActions();
+      telegramPoll = telegramPollRequest.then((batch) => {
+        if (batch) return serial(() => processTelegramActions(batch, async (action) => {
+          const state = await recover(false);
+          const command = commandForTelegramAction(action, state, (await readCustom()).jobs);
+          await handle(command);
+          return action.kind === "back" ? "Back requested. See its delivery report." : action.kind === "snooze" ? "Back reminder snoozed for 5 minutes." : "Schedule cancelled.";
+        }));
+      }).catch(() => console.warn("BreakBuddy: Telegram actions are unavailable.")).finally(() => {
+        telegramPoll = null;
+        telegramPollRequest = null;
+      });
+    }
+    return telegramPoll;
+  }
+  run(() => recover());
+});
 chrome.runtime.onInstalled.addListener(() => run(() => recover(true, true)));
 chrome.runtime.onStartup.addListener(() => run(() => recover(true, true)));
 chrome.idle.setDetectionInterval(60);
