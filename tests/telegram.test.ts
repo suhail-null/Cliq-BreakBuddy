@@ -16,6 +16,19 @@ beforeEach(()=>{
 afterEach(()=>{vi.useRealTimers();vi.unstubAllGlobals();});
 
 describe('Telegram delivery reports',()=>{
+  it('recovers one scheduling confirmation with the saved destination and local send time',async()=>{
+    await connect();const scheduledAt=Date.now()+10*60_000;
+    const state:State={...defaultState(),status:'BREAK_SCHEDULED',scheduledAt,group:'custom',customDestination:destination};
+    await queueTelegramState(state);await queueTelegramState(state);
+    expect(store.telegramReports).toHaveLength(1);expect(store.telegramReports[0].status).toBe('pending');
+    await flushTelegramReports();await queueTelegramState(state);await flushTelegramReports();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const text=JSON.parse(fetchMock.mock.calls[0][1].body).text;
+    expect(text).toContain('BreakBuddy: Break scheduled');expect(text).toContain('Chat: Reports');expect(text).toContain('Message: Break');
+    expect(text).toContain(`Scheduled for: ${new Date(scheduledAt).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'long'})}`);
+    expect(text).not.toContain('successfully sent');
+    await queueTelegramState({...state,scheduledAt:scheduledAt+60_000});await flushTelegramReports();expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
   it('is disabled by default and makes no network request',async()=>{
     await queueTelegramState(confirmed());await flushTelegramReports();
     expect(fetchMock).not.toHaveBeenCalled();expect(await getTelegramSettings()).toMatchObject({enabled:false,hasToken:false,pending:0});

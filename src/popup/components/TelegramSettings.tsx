@@ -28,7 +28,7 @@ export function TelegramSettings({busy,execute}:{busy:boolean;execute:(command:C
   return <form className="telegram-settings" onSubmit={save}>
     <fieldset className="form-card" disabled={busy||!saved}>
       <legend>Telegram delivery reports</legend>
-      <p className="field-hint">Get a Telegram report when Break, Back, or a custom message succeeds, fails, needs checking, or misses its schedule.</p>
+      <p className="field-hint">Get a Telegram confirmation when you schedule a Break, plus delivery reports when Break, Back, or a custom message succeeds, fails, needs checking, or misses its schedule.</p>
       <div className="check-field"><input id="telegram-enabled" type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)}/><label htmlFor="telegram-enabled">Enable Telegram reports</label></div>
       <label htmlFor="telegram-token">Bot token</label>
       <input id="telegram-token" type="password" autoComplete="new-password" spellCheck={false} maxLength={121} value={token} onChange={e=>setToken(e.target.value)} placeholder={saved?.hasToken?'Saved token — leave blank to keep':'Paste the token from BotFather'}/>

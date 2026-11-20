@@ -3,7 +3,7 @@ import type {CustomJob, Destination, State, TelegramSettings} from '../types';
 
 interface Config {enabled:boolean; botToken:string; chatId:string; enabledAt:number;}
 interface Report {id:string; text:string; status:'pending'|'sent'|'failed'; attempts:number; nextAt:number;}
-type Outcome='confirmed'|'failed'|'uncertain'|'overdue';
+type Outcome='scheduled'|'confirmed'|'failed'|'uncertain'|'overdue';
 const emptyConfig=():Config=>({enabled:false,botToken:'',chatId:'',enabledAt:0});
 const MAX_ATTEMPTS=5;
 
@@ -91,9 +91,10 @@ export async function testTelegram() {
 }
 
 function message(outcome:Outcome,text:string,destination:Destination|undefined,detail:string,at:number,manual=false) {
-  const title={confirmed:'Message successfully sent',failed:'Message was not sent',uncertain:'Delivery uncertain — check Cliq',overdue:'Scheduled message was missed — not sent'}[outcome];
+  const title={scheduled:'Break scheduled',confirmed:'Message successfully sent',failed:'Message was not sent',uncertain:'Delivery uncertain — check Cliq',overdue:'Scheduled message was missed — not sent'}[outcome];
+  const time=outcome==='scheduled'?`Scheduled for: ${new Date(at).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'long'})}`:`Time: ${new Date(at).toISOString()}`;
   return [`BreakBuddy: ${title}`,`Chat: ${destination?.name??'Saved Cliq destination'}`,`Message: ${text.length>200?text.slice(0,200)+'…':text}`,
-    `Time: ${new Date(at).toISOString()}`,manual?'Confirmed by your manual review.':outcome==='confirmed'?'Confirmed by Cliq UI verification.':detail.slice(0,400),
+    time,manual?'Confirmed by your manual review.':outcome==='confirmed'?'Confirmed by Cliq UI verification.':detail.slice(0,400),
     ...(outcome==='uncertain'?['Check this exact attempt in Cliq before retrying.']:[])].join('\n');
 }
 async function enqueue(id:string,outcome:Outcome,text:string,destination:Destination|undefined,detail:string,at:number,manual=false) {
@@ -106,6 +107,7 @@ async function enqueue(id:string,outcome:Outcome,text:string,destination:Destina
 export async function queueTelegramState(state:State) {
   try {
     if(!(await read()).config.enabled)return;
+    if(state.status==='BREAK_SCHEDULED'&&state.scheduledAt)await enqueue(`break:${state.scheduledAt}:scheduled`,'scheduled','Break',destinationFor(state.group,state.customDestination),'You will receive a separate report when the send is attempted.',state.scheduledAt);
     for(const entry of [...state.history].reverse())await enqueue(`${entry.id}:confirmed`,'confirmed',entry.text,entry.destination,'',entry.at,entry.proof==='manual');
     const op=state.operation;
     if(op&&(state.status==='ERROR'||state.status==='UNCERTAIN')) {

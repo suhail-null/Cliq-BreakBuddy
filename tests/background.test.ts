@@ -28,6 +28,37 @@ beforeEach(async()=>{
 });
 const sends=()=>api.tabs.sendMessage.mock.calls.filter((args:any[])=>args[1].type==='BB_SEND');
 describe('background service worker',()=>{
+  it('confirms a newly scheduled Break in Telegram once, then reports delivery separately',async()=>{
+    await request({type:'SAVE_TELEGRAM',enabled:true,botToken:'123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456789',chatId:'123456789'});
+    const result=await request({type:'SCHEDULE',minutes:10});
+    expect(result.ok).toBe(true);expect(store.state.status).toBe('BREAK_SCHEDULED');expect(sends()).toHaveLength(0);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const scheduled=JSON.parse(vi.mocked(fetch).mock.calls[0][1]!.body as string).text;
+    expect(scheduled).toContain('BreakBuddy: Break scheduled');expect(scheduled).toContain('Chat: MarTech');expect(scheduled).toContain('Scheduled for:');expect(scheduled).not.toContain('successfully sent');
+    await state();api.alarms.onAlarm.listeners[0]({name:BREAK_ALARM});await state();
+    expect(fetch).toHaveBeenCalledTimes(1);expect(sends()).toHaveLength(0);
+    const now=vi.spyOn(Date,'now').mockReturnValue(store.state.scheduledAt);
+    try {
+      api.alarms.onAlarm.listeners[0]({name:BREAK_ALARM});await state();
+      expect(fetch).toHaveBeenCalledTimes(2);expect(sends()).toHaveLength(1);
+      expect(JSON.parse(vi.mocked(fetch).mock.calls[1][1]!.body as string).text).toContain('Message successfully sent');
+    } finally {now.mockRestore();}
+  });
+  it('keeps a Break scheduled and its alarm armed when its Telegram confirmation fails',async()=>{
+    await request({type:'SAVE_TELEGRAM',enabled:true,botToken:'123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456789',chatId:'123456789'});
+    vi.mocked(fetch).mockRejectedValue(new Error('offline'));
+    const result=await request({type:'SCHEDULE',minutes:10});
+    expect(result.ok).toBe(true);expect(store.state.status).toBe('BREAK_SCHEDULED');expect(alarmStore.get(BREAK_ALARM).when).toBe(store.state.scheduledAt);
+    expect(store.telegramReports[0]).toMatchObject({status:'pending',text:expect.stringContaining('Break scheduled')});expect(sends()).toHaveLength(0);
+  });
+  it('does not send a scheduling confirmation for a rejected schedule or when Telegram is disabled',async()=>{
+    await request({type:'SAVE_TELEGRAM',enabled:true,botToken:'123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456789',chatId:'123456789'});
+    expect((await request({type:'SCHEDULE',minutes:0})).ok).toBe(false);expect(fetch).not.toHaveBeenCalled();
+    store.state.productionEnabled=false;
+    expect((await request({type:'SCHEDULE',minutes:10})).ok).toBe(false);expect(fetch).not.toHaveBeenCalled();
+    await request({type:'SAVE_TELEGRAM',enabled:false,botToken:'',chatId:'123456789'});store.state.productionEnabled=true;
+    expect((await request({type:'SCHEDULE',minutes:10})).ok).toBe(true);expect(fetch).not.toHaveBeenCalled();
+  });
   it('reports Break and Back once each without replaying them on repeated recovery',async()=>{
     expect((await request({type:'SAVE_TELEGRAM',enabled:true,botToken:'123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456789',chatId:'123456789'})).ok).toBe(true);
     store.state={...store.state,status:'BREAK_SCHEDULED',scheduledAt:Date.now()-500};api.alarms.onAlarm.listeners[0]({name:BREAK_ALARM});
